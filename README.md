@@ -1,6 +1,20 @@
 # buckets-man
 
-API REST para gestión de archivos sobre MinIO. Permite subir, descargar y generar URLs pre-firmadas para acceso directo al bucket.
+FastAPI microservice que actúa como proxy/gateway para MinIO (object storage).
+
+## Cómo funciona
+
+**Config** — carga vars de entorno (`.env`) y un cliente MinIO singleton desde `src/minio_client.py`.
+
+**Endpoints:**
+
+- `GET /files/{object_name}` — descarga un archivo de MinIO y lo devuelve como proxy
+- `POST /upload` — recibe un archivo y lo sube a MinIO
+- `POST /upload-multiple` — igual pero con varios archivos a la vez
+- `POST /files/presigned-upload` — genera una URL firmada para que el cliente suba directo a MinIO (sin pasar por el backend)
+- `POST /files/presigned-upload-multiple` — lo mismo para múltiples archivos
+- `GET /files/{object_name}/presigned-download` — URL firmada para descarga directa desde MinIO
+- `GET /debug` — lista el contenido del bucket y muestra la config
 
 ## Requisitos
 
@@ -59,3 +73,7 @@ Las URLs pre-firmadas permiten que el cliente suba o descargue archivos **direct
 ```
 
 La expiración por defecto es de **600 segundos (10 minutos)**.
+
+## Ventaja principal
+
+El diseño con URLs pre-firmadas evita que los archivos pasen por el backend: el cliente sube o descarga **directo a MinIO**, lo que elimina el cuello de botella del servidor, reduce latencia y no consume memoria ni ancho de banda del proceso Python. El backend solo interviene para autenticar y emitir la URL; el trabajo pesado lo hace MinIO directamente.

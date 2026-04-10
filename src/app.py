@@ -27,13 +27,7 @@ class MultipleUploadRequest(BaseModel):
     object_names: list[str]
     expires_in: int = 600
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins='*',
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
 
 @app.get("/files/{object_name}")
 def get_file(object_name: str):
