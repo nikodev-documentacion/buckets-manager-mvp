@@ -4,13 +4,36 @@ from dotenv import load_dotenv
 import os
 from io import BytesIO
 from datetime import timedelta
+from pydantic import BaseModel
+from fastapi.middleware.cors import CORSMiddleware
 
 
 load_dotenv()
 
 app = FastAPI()
 
+# Configurar CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Permite requests desde cualquier origen
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 BUCKET = os.getenv("MINIO_BUCKET")
+
+class MultipleUploadRequest(BaseModel):
+    object_names: list[str]
+    expires_in: int = 600
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins='*',
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/files/{object_name}")
 def get_file(object_name: str):
@@ -56,6 +79,49 @@ async def upload_file(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/upload-multiple")
+async def upload_multiple_files(files: list[UploadFile] = File(...)):
+    """
+    Sube múltiples archivos al bucket.
+    En Postman: usar form-data, agregar múltiples filas con key='files' (todas con el mismo nombre)
+    """
+    uploaded_files = []
+    errors = []
+
+    for file in files:
+        try:
+            file_data = await file.read()
+            file_stream = BytesIO(file_data)
+            file_stream.seek(0)
+
+            client.put_object(
+                bucket_name=BUCKET,
+                object_name=file.filename,
+                data=file_stream,
+                length=len(file_data),
+                content_type=file.content_type
+            )
+
+            uploaded_files.append({
+                "filename": file.filename,
+                "size_bytes": len(file_data),
+                "content_type": file.content_type,
+                "status": "uploaded"
+            })
+
+        except Exception as e:
+            errors.append({
+                "filename": file.filename,
+                "error": str(e)
+            })
+
+    return {
+        "uploaded": len(uploaded_files),
+        "failed": len(errors),
+        "files": uploaded_files,
+        "errors": errors
+    }
+
 
 @app.post("/files/presigned-upload")
 def get_presigned_upload_url(object_name: str, expires_in: int = 600):
@@ -80,6 +146,42 @@ def get_presigned_upload_url(object_name: str, expires_in: int = 600):
     except Exception as e:
         print(f"Error generating upload URL: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/files/presigned-upload-multiple")
+def get_presigned_upload_urls(request: MultipleUploadRequest):
+    """
+    Devuelve múltiples URLs pre-firmadas para subir archivos directos a MinIO.
+    Body: {"object_names": ["file1.png", "file2.pdf", ...], "expires_in": 600}
+    """
+    urls = []
+    errors = []
+
+    for object_name in request.object_names:
+        try:
+            url = client.presigned_put_object(
+                bucket_name=BUCKET,
+                object_name=object_name,
+                expires=timedelta(seconds=request.expires_in),
+            )
+            urls.append({
+                "object_name": object_name,
+                "url": url,
+                "method": "PUT",
+                "expires_in": request.expires_in,
+            })
+        except Exception as e:
+            errors.append({
+                "object_name": object_name,
+                "error": str(e)
+            })
+
+    return {
+        "bucket": BUCKET,
+        "urls": urls,
+        "errors": errors,
+        "total": len(urls),
+        "failed": len(errors)
+    }
 
 
 @app.get("/files/{object_name}/presigned-download")
